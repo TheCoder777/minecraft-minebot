@@ -1,30 +1,8 @@
-# MIT License
-#
-# Copyright (c) 2019 TheCoder777
-#
-# Permission is hereby granted, free of charge, to any person obtaining a copy
-# of this software and associated documentation files (the "Software"), to deal
-# in the Software without restriction, including without limitation the rights
-# to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-# copies of the Software, and to permit persons to whom the Software is
-# furnished to do so, subject to the following conditions:
-#
-# The above copyright notice and this permission notice shall be included in all
-# copies or substantial portions of the Software.
-#
-# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-# AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-# OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
-# SOFTWARE.
-
-
-import os, sys, time, cv2, keyboard, multiprocessing, queue, readline
+import os, sys, time, cv2, keyboard, pynput, multiprocessing, queue, readline
 import pyscreenshot as ImageGrab # for linux
 import pyautogui as pag
 import numpy as np
+# from pynput.keyboard import Key, Listener
 from time import sleep
 
 
@@ -62,7 +40,7 @@ class Defaults():
         self.default_pickaxe_health_game = 131
         self.iron_pickaxe_health_game = 250
         self.default_shovel_health_game = 131
-        self.debug = True # debugging output on/off
+        self.debug = False # debugging output on/off
 
         ## GAME ## DON'T TOUCH THESE VALUES ##
         self.default_default_pickaxe_health = 131
@@ -157,13 +135,13 @@ class Status:
         self.INPUT = colors.INPUT + colors.BOLD + "[ INPUT @{}s ] ".format(gametime.getTime()) + colors.END
         if defaults.debug:
             self.DEBUG = colors.DEBUG + colors.BOLD + "[ DEBUG @{}s ] ".format(gametime.getTime()) + colors.END
-# Global instance
-status = Status()
+# # Global instance
+# Status() = Status()
 
 class Timings:
     def __init__(self):
         self.start_countdown = 5
-        self.modifier = 0.2 # if the MineBot holds the mouse too short, this adds some time to make sure the block gets destroyed
+        self.modifier = 0.15 # if the MineBot holds the mouse too short, this adds some time to make sure the block gets destroyed
 
         ## digging
         # default pickaxe (stone)
@@ -200,17 +178,18 @@ class Timings:
         self.sec_move_forward = 0.5
         self.sec_lava_rescue = 5
         self.hold_shutdown_key = 1
+        self.hold_force_shutdown_key = 1
 
         # other
         # self.ore_scanner_wait = 1
-        self.sleep_run = 0.5 # only lavaScanner
+        # self.sleep_run = 0.5 # only lavaScanner
 # Global instance
 timings = Timings()
 
 class ColorRange():
     def __init__(self):
         #                      darkest          lightest (RGB)
-        self.lava_colors = [([213, 81, 0]), ([214, 81, 0])]
+        self.lava_colors = [([172, 65, 0]), ([214, 81, 0])]
         self.lava_lower = np.array(self.lava_colors[0], dtype = "uint8")
         self.lava_upper = np.array(self.lava_colors[1], dtype = "uint8")
 
@@ -247,11 +226,52 @@ class ColorRange():
         self.lapis_upper = np.array(self.lapis_colors[1], dtype = "uint8")
 
 
+class ForceKillListener(pynput.keyboard.Listener): # pynput.keyboard.Listener is a threading.Thread object!
+    def __init__(self, key, process):
+        pynput.keyboard.Listener.__init__(self)
+        global shutdown, forceKill
+        self.name = "ForceKillListener"
+        self.process = process
+        self.on_release = self.release_key
+        self.release_key(key)
+
+    def shutdown(self):
+        if defaults.debug:
+            print(Status().DEBUG + self.name + "@shutdown: shutdown process")
+        self.stop()
+
+    def checkShutdown(self):
+        global shutdown
+        if shutdown.is_set():
+            self.shutdown()
+
+    def release_key(self, key):
+        global shutdown, forceKill
+        self.checkShutdown()
+        if key == pynput.keyboard.Key.f12:
+            sleep(timings.hold_force_shutdown_key) # hold f12
+            if key == pynput.keyboard.Key.f12:
+                if defaults.debug:
+                    print(Status().DEBUG + "Terminating processes:")
+                print(Status().CRITICAL + "Force shutdown!")
+                for proc in self.process:
+                    if defaults.debug:
+                        if len(proc.name) > 8:
+                            print("\tProcess {}".format(proc.name), end="\t")
+                        else:
+                            print("\tProcess {}".format(proc.name), end="\t\t")
+                    proc.terminate()
+                    print(colors.RED + colors.BOLD + "TERMINATED!" + colors.END)
+                forceKill.set()
+                shutdown.set()
+                self.shutdown()
+
+
 class keyListener():
     def __init__(self):
         self.name = "keyListener"
         self.running = True
-        global shutdown, pause
+        global shutdown, pause, forceKill
         shutdown.clear() # clear == running; set == shutdown
         pause.set() # clear == pause; set == running # cause we use pause.wait()
 
@@ -262,26 +282,26 @@ class keyListener():
                 sleep(timings.hold_shutdown_key) # hold shutdown key, not only one press
                 if keyboard.is_pressed(defaults.shutdown_key):
                     if defaults.debug:
-                        print(status.DEBUG + "keyListener: Key {} detected!".format(defaults.shutdown_key))
+                        print(Status().DEBUG + "keyListener: Key {} detected!".format(defaults.shutdown_key))
                     shutdown.set()
                     if defaults.debug:
-                        print(status.DEBUG + self.name + "@listen: exiting process")
+                        print(Status().DEBUG + self.name + "@listen: exiting process")
                     break
             # check pause key
             if keyboard.is_pressed(defaults.pause_key):
                 if defaults.debug:
-                    print(status.DEBUG + "keyListener: Key {} detected!".format(defaults.pause_key))
+                    print(Status().DEBUG + "keyListener: Key {} detected!".format(defaults.pause_key))
                 pause.clear()
                 self.paused = True
-                print(status.WARNING + "PAUSING! YOU CAN DO OTHER STUFF WHILE I'LL WAIT!\n")
+                print(Status().WARNING + "PAUSING! YOU CAN DO OTHER STUFF WHILE I'LL WAIT!\n")
                 while self.paused:
                     if defaults.debug:
-                        print(status.DEBUG + "WAITING FOR PAUSE KEY TO RESUME!")
+                        print(Status().DEBUG + "WAITING FOR PAUSE KEY TO RESUME!")
                     sleep(1)
                     if keyboard.is_pressed(defaults.pause_key):
                         if defaults.debug:
-                            print(status.DEBUG + "PAUSE KEY PRESSED, RESUME!")
-                        print(status.WARNING + "RESUME!")
+                            print(Status().DEBUG + "PAUSE KEY PRESSED, RESUME!")
+                        print(Status().WARNING + "RESUME!")
                         pause.set()
                         sleep(1)
                         break
@@ -291,11 +311,11 @@ class keyListener():
                         sleep(timings.hold_shutdown_key) # hold shutdown key, not only one press
                         if keyboard.is_pressed(defaults.shutdown_key):
                             if defaults.debug:
-                                print(status.DEBUG + "keyListener: Key {} detected!".format(defaults.shutdown_key))
+                                print(Status().DEBUG + "keyListener: Key {} detected!".format(defaults.shutdown_key))
                             pause.set() # going out of pause into shutdown
                             shutdown.set()
                             if defaults.debug:
-                                print(status.DEBUG + self.name + "@listen: exiting process")
+                                print(Status().DEBUG + self.name + "@listen: exiting process")
                             break
                         else:
                             pause.clear() # pause if no shutdown key!
@@ -303,8 +323,12 @@ class keyListener():
             if shutdown.is_set():
                 self.running = False
                 if defaults.debug:
-                    print(status.DEBUG + self.name + "@listen: shutdown process")
-        return True
+                    print(Status().DEBUG + self.name + "@listen: shutdown process")
+
+        if forceKill.is_set():
+            return "forceKill"
+        else:
+            return True
 
     def resetKeys(self):
         pag.press(defaults.jump_key)
@@ -329,7 +353,7 @@ class lavaScanner(multiprocessing.Process):
         self.running = True
         self.color_range = ColorRange()
         self.Gamecoords = Gamecoords
-        global lava, shutdown, pause, running
+        global lava, shutdown, pause, running, lava_time
         running = True
 
     def run(self):
@@ -338,22 +362,26 @@ class lavaScanner(multiprocessing.Process):
             if defaults.debug:
                 self.start_lava_time = time.time()
 
+            self.lava_start_time = time.time()
+            self.checkShutdown()
             self.getScreen()
             self.checkLava()
-            pause.wait() # if set, pause scanner
             if defaults.debug:
-                print(status.DEBUG + "Lava scan took {0:.4f}s".format(time.time() - self.start_lava_time))
+                print(Status().DEBUG + "Lava scan took {0:.4f}s".format(time.time() - self.start_lava_time))
             self.checkShutdown()
-            sleep(timings.sleep_run)
+            with lava_time.get_lock():
+                lava_time.value = time.time() - self.lava_start_time
+            pause.wait() # if set, pause scanner
+            # sleep(timings.sleep_run)
             # if shutdown.is_set():
             #     self.running = False
             #     if defaults.debug:
-            #         print(status.DEBUG + self.name + "@run: shutdown process")
+            #         print(Status().DEBUG + self.name + "@run: shutdown process")
 
     def shutdown(self):
         global running
         if defaults.debug:
-            print(status.DEBUG + self.name + "@shutdown: shutdown process")
+            print(Status().DEBUG + self.name + "@shutdown: shutdown process")
         running = False
 
     def checkShutdown(self):
@@ -366,16 +394,16 @@ class lavaScanner(multiprocessing.Process):
     def checkLava(self):
         self.lava_mask = cv2.inRange(self.screen, self.color_range.lava_lower, self.color_range.lava_upper)
         if (self.lava_mask > defaults.lowest_light_level).any():
-            print(status.CRITICAL + "==> LAVA FOUND!")
-            print(status.CRITICAL + "==> Sending notification to MineBot!")
+            print(Status().CRITICAL + "==> LAVA FOUND!")
+            print(Status().CRITICAL + "==> Sending notification to MineBot!")
             lava.set()
             sleep(timings.sec_lava_rescue)
-            print(status.WARNING + "Trying to shutdown all processes!")
+            print(Status().WARNING + "Trying to shutdown all processes!")
             shutdown.set()
             self.shutdown()
 
         else:
-            print(status.GOOD + "==> No lava found!")
+            print(Status().GOOD + "==> No lava found!")
             lava.clear()
 
 
@@ -408,17 +436,17 @@ class oreScanner(multiprocessing.Process):
             # sleep(timings.ore_scanner_wait)
 
             if defaults.debug:
-                print(status.DEBUG + "Ore scan took {0:.4f}s".format(time.time() - self.start_ore_time))
+                print(Status().DEBUG + "Ore scan took {0:.4f}s".format(time.time() - self.start_ore_time))
 
             if not self.new_ores: # if no new ores detected
-                print(status.STATUS + "==> No new ores!")
-            self.displayOres() # always print status list about all ores
+                print(Status().STATUS + "==> No new ores!")
+            self.displayOres() # always print Status() list about all ores
             self.checkShutdown()
             with ore_time.get_lock():
                 ore_time.value = time.time() - self.ore_time_start
             if defaults.debug:
-                print(status.WARNING + "dig_time.value:", dig_time.value)
-                print(status.WARNING + "ore_time.value:", ore_time.value)
+                print(Status().WARNING + "dig_time.value:", dig_time.value)
+                print(Status().WARNING + "ore_time.value:", ore_time.value)
             sleep(dig_time.value)
 
             # sleep(timings.sleep_run)
@@ -426,7 +454,7 @@ class oreScanner(multiprocessing.Process):
     def shutdown(self):
         global running
         if defaults.debug:
-            print(status.DEBUG + self.name + "@shutdown: shutdown process")
+            print(Status().DEBUG + self.name + "@shutdown: shutdown process")
         running = False
 
     def checkShutdown(self):
@@ -435,7 +463,7 @@ class oreScanner(multiprocessing.Process):
 
 
     def displayOres(self):
-        print(status.STATUS + "Ores found:")
+        print(Status().STATUS + "Ores found:")
         for ore, num in self.ores.items():
             if len(ore) >= 7:
                 print("\t\t\t{}:\t{}".format(ore, num))
@@ -452,56 +480,56 @@ class oreScanner(multiprocessing.Process):
         ## redstone/emeralds/gold:
         self.reg_mask = cv2.inRange(self.screen, self.color_range.reg_lower, self.color_range.reg_upper)
         if (self.reg_mask > defaults.lowest_light_level).any():
-            print(status.GOOD + "==> Redstone/Emeralds/Gold found!")
+            print(Status().GOOD + "==> Redstone/Emeralds/Gold found!")
             self.ores["reg"] += 1
             self.new_ores.append("reg")
 
         ## stone/andeside/diorite/granite:
         self.sadg_mask = cv2.inRange(self.screen, self.color_range.sadg_lower, self.color_range.sadg_upper)
         if (self.sadg_mask > defaults.lowest_light_level).any():
-            print(status.GOOD + "==> Stone/Andeside/Diorite/Granite found!")
+            print(Status().GOOD + "==> Stone/Andeside/Diorite/Granite found!")
             self.ores["sadg"] += 1
             self.new_ores.append("sadg")
 
         ## dirt:
         self.dirt_mask = cv2.inRange(self.screen, self.color_range.dirt_lower, self.color_range.dirt_upper)
         if (self.dirt_mask > defaults.lowest_light_level).any():
-            print(status.GOOD + "==> Dirt found!")
+            print(Status().GOOD + "==> Dirt found!")
             self.ores["dirt"] += 1
             self.new_ores.append("dirt")
 
         ## gravel:
         self.gravel_mask = cv2.inRange(self.screen, self.color_range.gravel_lower, self.color_range.gravel_upper)
         if (self.gravel_mask > defaults.lowest_light_level).any():
-            print(status.GOOD + "==> Gravel found!")
+            print(Status().GOOD + "==> Gravel found!")
             self.ores["gravel"] += 1
             self.new_ores.append("gravel")
 
         ## diamonds
         self.diamond_mask = cv2.inRange(self.screen, self.color_range.diamond_lower, self.color_range.diamond_upper)
         if (self.diamond_mask > defaults.lowest_light_level).any():
-            print(status.GOOD + "==> Diamonds found!")
+            print(Status().GOOD + "==> Diamonds found!")
             self.ores["diamond"] += 1
             self.new_ores.append("diamond")
 
         ## iron
         self.iron_mask = cv2.inRange(self.screen, self.color_range.iron_lower, self.color_range.iron_upper)
         if (self.iron_mask > defaults.lowest_light_level).any():
-            print(status.GOOD + "==> Iron found!")
+            print(Status().GOOD + "==> Iron found!")
             self.ores["iron"] += 1
             self.new_ores.append("iron")
 
         ## coal
         self.coal_mask = cv2.inRange(self.screen, self.color_range.coal_lower, self.color_range.coal_upper)
         if (self.coal_mask > defaults.lowest_light_level).any():
-            print(status.GOOD + "==> Coal found!")
+            print(Status().GOOD + "==> Coal found!")
             self.ores["coal"] += 1
             self.new_ores.append("coal")
 
         ## lapis
         self.lapis_mask = cv2.inRange(self.screen, self.color_range.lapis_lower, self.color_range.lapis_upper)
         if (self.lapis_mask > defaults.lowest_light_level).any():
-            print(status.GOOD + "==> Lapis found!")
+            print(Status().GOOD + "==> Lapis found!")
             self.ores["lapis"] += 1
             self.new_ores.append("lapis")
 
@@ -514,7 +542,7 @@ class MineBot(multiprocessing.Process):
         self.total_way = 0
         self.torch_way = 0
         self.torches = defaults.torches
-        self.torch_interval = defaults.torches
+        self.torch_interval = defaults.torch_interval
         self.default_pickaxe_health = defaults.default_pickaxe_health_game
         self.iron_pickaxe_health = defaults.iron_pickaxe_health_game
         self.default_shovel_health = defaults.default_shovel_health_game
@@ -524,46 +552,62 @@ class MineBot(multiprocessing.Process):
         self.default_pickaxe_used = 1 # how many pickaxes/shovels are already swapped/used
         self.iron_pickaxe_used = 1    # '1' cause one is already in use
         self.default_shovel_used = 1
-        global lava, shutdown, pause, running
+        global lava, shutdown, pause, running, lava_time
         running = True
 
     def shutdown(self):
         global running
         if defaults.debug:
-            print(status.DEBUG + self.name + "@shutdown: shutdown process")
+            print(Status().DEBUG + self.name + "@shutdown: shutdown process")
         running = False
+        return True
 
     def checkShutdown(self):
         if shutdown.is_set():
-            self.shutdown()
+            return self.shutdown()
 
     def displayStatus(self):
-        print(status.STATUS + "Total way:",self.total_way)
-        print(status.STATUS + "Blocks to next torch:",self.torch_interval - self.torch_way)
-        print(status.STATUS + "Torches left:",self.torches)
-        print(status.STATUS + "Default pickaxe health left:",self.default_pickaxe_health)
-        print(status.STATUS + "Iron pickaxe health left:",self.iron_pickaxe_health)
+        print(Status().STATUS + "Total way:",self.total_way)
+        print(Status().STATUS + "Blocks to next torch:",self.torch_interval - self.torch_way)
+        print(Status().STATUS + "Torches left:",self.torches)
+        print(Status().STATUS + "Default pickaxe health left:",self.default_pickaxe_health)
+        print(Status().STATUS + "Iron pickaxe health left:",self.iron_pickaxe_health)
         print() # newline
 
-    def lavaRescue(self, sec=timings.sec_lava_rescue):
+    def lavaRescue(self, sec=timings.sec_lava_rescue, pos="default"):
+        if pos == "top":
+            self.moveFaceOneBlockDown()
         pag.keyDown(defaults.move_back_key)
         pag.keyDown(defaults.jump_key)
-        print(status.CRITICAL + "RUNNING AWAY FROM LAVA!")
+        print(Status().CRITICAL + "RUNNING AWAY FROM LAVA!")
         sleep(sec)
         pag.keyUp(defaults.move_back_key)
         pag.keyUp(defaults.jump_key)
         self.shutdown()
 
-    def checkLava(self):
+    def checkLava(self, pos="default"):
         if defaults.debug:
-            print(status.DEBUG + "Minebot is checking for lava!")
-        if lava.is_set():
-            self.lavaRescue()
+            print(Status().DEBUG + "Minebot is checking for lava!")
+        if pos == "default":
+            if defaults.debug:
+                print(Status().DEBUG + "Minebot is sleeping for last lava time! [{}]".format(lava_time.value))
+            sleep(lava_time.value)
+            if lava.is_set():
+                self.lavaRescue()
+        elif pos == "top":
+            self.moveFaceOneBlockUp()
+            if defaults.debug:
+                print(Status().DEBUG + "Minebot is sleeping for last lava time!")
+            sleep(lava_time.value)
+            if lava.is_set():
+                self.lavaRescue(pos="top")
+
+
 
     def checkOres(self):
         self.new_ores = self.ore_pipe.recv()
         if defaults.debug:
-            print(status.DEBUG + "reciving new ores:\n\n\n\t\t" + colors.BOLD, self.new_ores, "\n\n\n" + colors.END)
+            print(Status().DEBUG + "reciving new ores:\n\n\n\t\t" + colors.BOLD, self.new_ores, "\n\n\n" + colors.END)
         if self.new_ores:
             return True
 
@@ -586,7 +630,7 @@ class MineBot(multiprocessing.Process):
             self.dropSelectedItem()
             self.switchInventory()
             self.moveItem(coords.slot_1[num], defaults.default_pickaxe_slot_coords)
-            print(status.ACTION + "Swapped default pickaxe")
+            print(Status().ACTION + "Swapped default pickaxe")
             self.default_pickaxe_health = defaults.default_default_pickaxe_health # reset, cause new pickaxe
             self.default_pickaxe_used += 1 # add one used pickaxe
             self.switchInventory()
@@ -597,7 +641,7 @@ class MineBot(multiprocessing.Process):
             self.dropSelectedItem()
             self.switchInventory()
             self.moveItem(coords.slot_2[num], defaults.iron_pickaxe_slot_coords)
-            print(status.ACTION + "Swapped iron pickaxe")
+            print(Status().ACTION + "Swapped iron pickaxe")
             self.iron_pickaxe_health = defaults.default_iron_pickaxe_health # reset, cause new pickaxe
             self.iron_pickaxe_used += 1
             self.switchInventory()
@@ -609,7 +653,7 @@ class MineBot(multiprocessing.Process):
             self.switchInventory()
             self.moveItem(coords.slot_3[num], defaults.default_shovel_slot_coords)
         else:
-            print(status.WARNING + "Couldn't find {} tool!".format(pickaxe))
+            print(Status().WARNING + "Couldn't find {} tool!".format(tool))
 
     def checkDefautlShovelHealth(self):
         if self.default_pickaxe_health < 2:
@@ -625,17 +669,17 @@ class MineBot(multiprocessing.Process):
 
     def selectDefaultShovel(self):
         if defaults.debug:
-            print(status.DEBUG + "Selecting default shovel!")
+            print(Status().DEBUG + "Selecting default shovel!")
         pag.press(defaults.default_shovel_slot)
 
     def selectDefaultPickaxe(self):
         if defaults.debug:
-            print(status.DEBUG + "Selecting default pickaxe!")
+            print(Status().DEBUG + "Selecting default pickaxe!")
         pag.press(defaults.default_pickaxe_slot)
 
     def selectIronPickaxe(self):
         if defaults.debug:
-            print(status.DEBUG + "Selecting iron pickaxe!")
+            print(Status().DEBUG + "Selecting iron pickaxe!")
         pag.press(defaults.iron_pickaxe_slot)
 
     def selectTorch(self):
@@ -707,6 +751,9 @@ class MineBot(multiprocessing.Process):
     def placeSelectedItem(self):
         pag.click(button="right")
 
+    def switch_torch():
+        pass
+
     def placeTorch(self):
         self.turnRight()
         sleep(0.1)
@@ -717,11 +764,13 @@ class MineBot(multiprocessing.Process):
         sleep(0.1)
         self.turnLeft()
         self.selectDefaultPickaxe()
-        print(status.ACTION + "Placed torch")
+        print(Status().ACTION + "Placed torch")
 
     def checkTorch(self):
         if self.torch_way == defaults.torch_interval:
             self.placeTorch()
+        # if self.total_way > (self.torches * self.torch_interval):
+        #     self.switch_torch()
 
     def run(self): # mine
         global running
@@ -732,10 +781,10 @@ class MineBot(multiprocessing.Process):
             self.checkLava()
             if self.checkOres():
                 if defaults.debug:
-                    print(status.DEBUG + colors.BOLD + "new ores!" + colors.END)
+                    print(Status().DEBUG + colors.BOLD + "new ores!" + colors.END)
                 if self.checkOresNeedIron():
                     if defaults.debug:
-                        print(status.DEBUG + colors.BOLD + "ores need iron!" + colors.END)
+                        print(Status().DEBUG + colors.BOLD + "ores need iron!" + colors.END)
                     self.digOreNeedIron()
                 else:
                     self.digBlock()
@@ -747,12 +796,14 @@ class MineBot(multiprocessing.Process):
             self.checkLava()
             self.checkTorch()
             self.checkLava()
-            self.checkShutdown()
+            if self.checkShutdown():
+                break
             pause.wait()
             self.checkLava()
             with dig_time.get_lock(): # only time from first block
                 dig_time.value = time.time() - self.dig_time_start
             # bottom block
+            self.dig_time_start = time.time()
             self.moveFaceOneBlockDown() # set focus to bottom block
             self.displayStatus()
             self.checkLava()
@@ -768,7 +819,8 @@ class MineBot(multiprocessing.Process):
             self.torch_way += 1
             self.total_way += 1
             # pause
-            self.checkShutdown()
+            if self.checkShutdown():
+                break
             pause.wait()
             self.checkLava()
             with dig_time.get_lock(): # only time from first block
@@ -781,15 +833,19 @@ def getInfo():
     # global defaults
 
     ## getting info about ingame stuff
-    pickaxe_health_new = str(input(status.INPUT + "How much health has the default pickaxe left: "))
+    pickaxe_health_new = str(input(Status().INPUT + "How much health has the default pickaxe left: "))
     if pickaxe_health_new:
         defaults.default_pickaxe_health_game = int(pickaxe_health_new)
 
-    iron_pickaxe_health_new = str(input(status.INPUT + "How much health has the iron pickaxe left: "))
+    iron_pickaxe_health_new = str(input(Status().INPUT + "How much health has the iron pickaxe left: "))
     if iron_pickaxe_health_new:
         defaults.iron_pickaxe_health_game = int(iron_pickaxe_health_new)
 
-    torches_new = str(input(status.INPUT + "How much torches left: "))
+    default_shovel_health_new = str(input(Status().INPUT + "How much health has the default shovel left: "))
+    if default_shovel_health_new:
+        defaults.default_shovel_health_game = int(default_shovel_health_new)
+
+    torches_new = str(input(Status().INPUT + "How much torches left: "))
     if torches_new:
         if torches_new in ["full", "f", "F"]:
             defaults.torches = 64
@@ -807,44 +863,54 @@ def main():
     print(colors.GREEN + colors.BOLD + colors.UNDERLINE + "Starting MineBot!\n\n" + colors.END)
     getInfo()
     ## globals
-    global shutdown, pause, lava, dig_time, ore_time
-    ## set globals
+    global shutdown, pause, lava, dig_time, ore_time, lava_time, forceKill
+    ## set globalsif defaults.debug:
+            # print(Status().DEBUG + "Minebot is sleeping for last lava time!")
+            # sleep(lava_time.value)
     pause = multiprocessing.Event()
     pause.set()
     shutdown = multiprocessing.Event()
     shutdown.clear()
+    forceKill = multiprocessing.Event()
+    forceKill.clear()
     ore_recver, ore_sender = multiprocessing.Pipe()
-    dig_time = multiprocessing.Value('d', 0.1) # just to set a value (random)
-    ore_time = multiprocessing.Value('d', 0.1) # just to set a value (random)
+    dig_time = multiprocessing.Value('d', 1) # just to set a value (random)
+    ore_time = multiprocessing.Value('d', 1) # just to set a value (random)
+    lava_time = multiprocessing.Value('d', 1)
     lava = multiprocessing.Event()
     lava.clear()
     lavascanner = lavaScanner() # initialize lava scanner process
     orescanner = oreScanner(ores_dict=defaults.ores.copy(), ore_pipe=ore_sender) # initialize ore scanner process
     keylistener = keyListener()
     minebot = MineBot(ore_pipe=ore_recver) # initialize minebot class
-
+    procs = [lavascanner, orescanner, minebot]
+    forcekilllistener = ForceKillListener(None, procs)
     countdown() # starting countdown
 
+    forcekilllistener.start()
     lavascanner.start() # starting lava scanner
     orescanner.start() # starting ore scanner
     minebot.start() # starting minebot
+
     val = keylistener.listen()
 
     if val == True:
-        print(status.WARNING + "Shutting down Minebot!\n")
+        print(Status().WARNING + "Shutting down Minebot!\n")
         if defaults.debug:
-            print(status.DEBUG + "Waiting for lavaScanner to exit...\n")
+            print(Status().DEBUG + "Waiting for lavaScanner to exit...\n")
         lavascanner.join()
         if defaults.debug:
-            print(status.DEBUG + "lavaScanner joined successfully!\n")
-            print(status.DEBUG + "Waiting for oreScanner to exit...\n")
+            print(Status().DEBUG + "lavaScanner joined successfully!\n")
+            print(Status().DEBUG + "Waiting for oreScanner to exit...\n")
         orescanner.join()
         if defaults.debug:
-            print(status.DEBUG + "oreScanner joined successfully!\n")
-            print(status.DEBUG + "Waiting for MineBot to exit...\n")
+            print(Status().DEBUG + "oreScanner joined successfully!\n")
+            print(Status().DEBUG + "Waiting for MineBot to exit...\n")
         minebot.join()
         if defaults.debug:
-            print(status.DEBUG + "MineBot joined successfully!\n")
+            print(Status().DEBUG + "MineBot joined successfully!\n")
+            print(Status().DEBUG + "Waiting for forcekilllistener to exit...\n")
+        forcekilllistener.join()
         # lavascanner.kill()
         # orescanner.kill()
         # minebot.kill()
@@ -855,17 +921,28 @@ def main():
 
         # keyListener().resetKeys()
         if defaults.debug:
-            print(status.DEBUG + "Shutdown successfull!")
+            print(Status().DEBUG + "Shutdown successfull!")
+
+    elif val == "forceKill":
+        mouse = pynput.mouse.Controller() # pyautogui not working here???
+        keyboard.press_and_release(defaults.jump_key)
+        keyboard.press_and_release(defaults.move_back_key)
+        keyboard.press_and_release(defaults.move_forward_key)
+        mouse.press(pynput.mouse.Button.left)
+        mouse.release(pynput.mouse.Button.left)
+        if defaults.debug:
+            print(Status().DEBUG + "ForceKill reached main Thread!")
 
     else: # something went terrible wrong
         if defaults.debug:
-            print(status.DEBUG + "Problems in main thread! Terminating processes!")
-        lavascanner.termintate()
-        orescanner.termintate()
-        minebot.termintate()
+            print(Status().DEBUG + "Problems in main thread! Terminating processes!")
+        lavascanner.terminate()
+        orescanner.terminate()
+        minebot.terminate()
+        forcekilllistener.terminate()
 
 if __name__ == "__main__":
     main()
     if defaults.debug:
-        print(status.DEBUG + "Exiting main process!")
+        print(Status().DEBUG + "Exiting main process!")
     sys.exit()
