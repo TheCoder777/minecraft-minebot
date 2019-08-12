@@ -17,7 +17,7 @@ What you need to have installed:
 To install all of them:
 
 ```bash
-pip instal numpy pyautogui pyscreenshot keyboard opencv-python pynput
+sudo pip instal numpy pyautogui pyscreenshot keyboard opencv-python pynput
 ```
 
 ## How to use
@@ -38,26 +38,39 @@ For purpose of lightning, you will need to have at least one torch in your off-h
 and you need to hold your torches in the 9th slot of your inventory hotbar!
 (if torches are empty, the minebot will stop!)
 
-To start mining, start the programm from you terminal of choice
-(you need to execute is with sudo on linux, because I'm using the keyboard module at some parts!).
-First you'll be asked for some healt stats of your tools, then a countdown will appear!
+To start mining, start the program from you terminal of choice
+(you need to execute is with sudo on Linux, because I'm using the keyboard module at some parts).
+First you'll be asked for some health stats of your tools, then a countdown will appear!
 As the countdown counts down, you have to switch you mouse focus to the mincraft window.
 To make the minebot work properly,
 you have to look at the top block in front of you in a 2 block high and 1 block wide mining tunnel!
 
+To pause the minebot press "p" button. To shutdown the minebot hold the "m" key for one second!
+
+To force kill the minebot (and all other spawned processes) hold the 'F12' key!
+(you can *not* change this key in settings!)
+This will terminate all running processes that were started by the main thread!
+(basically it sends a SIG-TERM signal to every process, or in other words calls the terminate function)
+**Do this only on your own risk!**
+
+**This can cause zombie processes!**
 
 ## Settings
 
 You can change pretty much every kind of value in the 'defaults' or the 'timings' classes!
 There are also some settings like debugging and also some values you can touch on your own risk!
-(really, dont touch them!)
+*(really, don't touch them!)*
 
 
 ## Status
 Lava detection works excellent!
+
 Ore detection is also pretty good!
+
 Picaxe/shovel swapping works also pretty well!
+
 There is some delay between detecting dirt and selecting the shovel!
 
 If someone wants to help developing this minebot, please to that!
-I'm not actively developing this anymore!
+
+**I'm not actively developing this anymore!**
