@@ -1,7 +1,24 @@
 # Minecraft MineBot
 
-This is a fully automatic minebot for minecraft version 1.14.x (not tested in other versions)
+This is a fully automatic minebot for minecraft version 1.14.x (not tested in other versions).
+It works via screen capturing and some sort of color detection through opencv!
 
+
+## Dependencies
+What you need to have installed:
+
++ numpy
++ pyautogui
++ pyscreenshot
++ keyboard
++ opencv (cv2)
++ pynput
+
+To install all of them:
+
+```bash
+pip instal numpy pyautogui pyscreenshot keyboard opencv-python pynput
+```
 
 ## How to use
 
